@@ -123,23 +123,51 @@ bash install_daemon.sh
 This installs a launchd agent that:
 - Starts automatically when you log in
 - Restarts within 30 seconds if it crashes
-- Runs silently in the background — no Terminal needed
+- Runs silently in the background — no Terminal window needed
+- Lock your screen and walk away — it keeps running
 
-**Important:** Go to **System Settings → Energy → Power Adapter** and enable **"Prevent automatic sleeping when display is off"** so the daemon keeps running when your screen locks.
+**Energy settings** — System Settings → Energy → Power Adapter:
+- ✓ Prevent automatic sleeping when display is off
+- ✓ Enable Power Nap
+- ✓ Wake for network access
+
+**If your project is in `~/Desktop` or `~/Documents`** — System Settings → Privacy & Security → Full Disk Access → add `/bin/bash` (press `Cmd+Shift+G` in the file picker and type `/bin`).
 
 To manage the daemon:
 ```bash
-# Check status
-launchctl list | grep vigilant-trader
-
-# Stop
-launchctl unload ~/Library/LaunchAgents/com.codebluemd.vigilant-trader.plist
-
-# Start
-launchctl load ~/Library/LaunchAgents/com.codebluemd.vigilant-trader.plist
+# Check status (should show a PID, not -)
+launchctl list | grep vigilanttrader
 
 # Watch logs live
 tail -f vigilant.log
+
+# Stop
+launchctl bootout gui/$(id -u)/com.codebluemd.vigilanttrader
+
+# Restart
+launchctl kickstart gui/$(id -u)/com.codebluemd.vigilanttrader
+```
+
+### Common macOS launchd Issues
+
+**Daemon shows `EX_CONFIG (78)` and never starts**
+
+Three possible causes, check in order:
+
+1. **TCC blocks log file** — launchd opens `StandardOutPath`/`StandardErrorPath` before exec-ing your program. Files in `~/Desktop`, `~/Documents`, `~/Downloads` are TCC-protected. The install script already handles this by pointing stdout/stderr to `/dev/null` (the app writes its own log via Python's `FileHandler`).
+
+2. **Gatekeeper rejects Homebrew Python** — launchd can't exec non-system Python binaries directly. The install script handles this with a `/bin/bash` wrapper (`run_daemon.sh`).
+
+3. **Poisoned label** — after repeated crashes, launchd's persistent state database throttles the label indefinitely. `bootout`/`bootstrap` doesn't clear it. Fix: run `install_daemon.sh` again (uses a clean label) or reboot.
+
+**Diagnosis:**
+```bash
+# See actual state and last exit code
+launchctl print gui/$(id -u)/com.codebluemd.vigilanttrader
+
+# Test if launchd can access your project directory
+# (create a one-shot plist that runs: ls ~/Desktop > /tmp/test.txt)
+# If /tmp/test.txt is empty after loading → TCC is blocking
 ```
 
 ---
