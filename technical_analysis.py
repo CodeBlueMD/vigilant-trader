@@ -61,11 +61,11 @@ def detect_rsi_divergence(close: pd.Series, rsi_series: pd.Series, window: int =
         return "none"
     c = close.dropna().tail(window).values
     r = rsi_series.dropna().tail(window).values
-    if len(c) < 6 or len(r) < 6:
+    if len(c) < 7 or len(r) < 7:
         return "none"
 
-    price_highs = [i for i in range(1, len(c) - 1) if c[i] > c[i-1] and c[i] > c[i+1]]
-    price_lows  = [i for i in range(1, len(c) - 1) if c[i] < c[i-1] and c[i] < c[i+1]]
+    price_highs = [i for i in range(2, len(c) - 2) if c[i] == max(c[i-2:i+3])]
+    price_lows  = [i for i in range(2, len(c) - 2) if c[i] == min(c[i-2:i+3])]
 
     if len(price_highs) >= 2:
         ph1, ph2 = price_highs[-2], price_highs[-1]
@@ -119,6 +119,7 @@ class PositionalSignals:
     outperforming_spy: bool = False
 
     consecutive_direction: str | None = None
+    consecutive_streak: int = 0
     last_date: str = ""
     errors: list = field(default_factory=list)
 
@@ -145,6 +146,14 @@ def compute_positional_signals(
     if ticker.endswith(".TO"):
         sig.currency = "CAD"
 
+    # ATR computed early so nearness thresholds can scale with asset volatility
+    if len(df_daily) >= 14:
+        atr_series = atr(df_daily, length=14)
+        sig.atr_14 = _last(atr_series)
+        if sig.atr_14 and sig.price:
+            sig.stop_distance_pct = round(2 * sig.atr_14 / sig.price * 100, 2)
+    atr_distance = sig.atr_14 if sig.atr_14 else (sig.price * 0.03)
+
     if len(close) >= 50:
         sig.high_52w = float(close.tail(252).max())
         sig.low_52w = float(close.tail(252).min())
@@ -160,7 +169,7 @@ def compute_positional_signals(
         sig.ma_stack_bearish = sig.price < sig.sma_50 < sig.sma_200
 
     if sig.sma_200:
-        sig.near_200sma = abs(sig.price - sig.sma_200) / sig.sma_200 < 0.02
+        sig.near_200sma = abs(sig.price - sig.sma_200) <= 1.5 * atr_distance
 
     if df_weekly is not None and not df_weekly.empty and len(df_weekly) >= 30:
         wclose = df_weekly["close"].astype(float)
@@ -184,12 +193,6 @@ def compute_positional_signals(
     if sig.near_52w_high and sig.volume_spike and sig.high_52w:
         sig.breakout_52w_high = sig.price >= sig.high_52w * 0.99
 
-    if len(df_daily) >= 14:
-        atr_series = atr(df_daily, length=14)
-        sig.atr_14 = _last(atr_series)
-        if sig.atr_14 and sig.price:
-            sig.stop_distance_pct = round(2 * sig.atr_14 / sig.price * 100, 2)
-
     if len(close) >= 64:
         ret_63 = (float(close.iloc[-1]) - float(close.iloc[-64])) / float(close.iloc[-64]) * 100
         sig.return_63d = round(ret_63, 2)
@@ -202,7 +205,16 @@ def compute_positional_signals(
             sig.outperforming_spy = sig.return_63d > sig.spy_return_63d
 
     if len(close) >= 2:
-        delta = float(close.iloc[-1]) - float(close.iloc[-2])
-        sig.consecutive_direction = "up" if delta > 0 else "down" if delta < 0 else "flat"
+        deltas = np.diff(close.values)
+        last_dir = "up" if deltas[-1] > 0 else "down" if deltas[-1] < 0 else "flat"
+        sig.consecutive_direction = last_dir
+        streak = 0
+        for d in reversed(deltas):
+            curr_dir = "up" if d > 0 else "down" if d < 0 else "flat"
+            if curr_dir == last_dir:
+                streak += 1
+            else:
+                break
+        sig.consecutive_streak = streak
 
     return sig

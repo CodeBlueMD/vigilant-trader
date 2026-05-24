@@ -6,6 +6,7 @@ Quant gates are deterministic Python. AI adds narrative only.
 from __future__ import annotations
 
 import datetime
+import time
 from dataclasses import dataclass, field
 
 from config import (
@@ -21,11 +22,7 @@ from data_fetcher import (
     fetch_weekly,
     trading_days_until,
 )
-from database import (
-    get_consecutive_closes,
-    record_positional_signal,
-    set_consecutive_closes,
-)
+from database import record_positional_signal
 from technical_analysis import PositionalSignals, compute_positional_signals
 
 # SPY is the market regime reference regardless of watchlist
@@ -73,7 +70,7 @@ def _determine_signal_direction(sig: PositionalSignals) -> str | None:
 
 
 def _count_confluence(sig: PositionalSignals, direction: str) -> list[str]:
-    """Return list of confluence factors that fired."""
+    """Return list of confluence factors that fired (mutually exclusive within category)."""
     factors = []
 
     if direction == "bullish":
@@ -85,14 +82,14 @@ def _count_confluence(sig: PositionalSignals, direction: str) -> list[str]:
                 levels.append("52w low")
             factors.append(f"Price at key level ({', '.join(levels)})")
 
-        if sig.volume_spike:
+        # Breakout supersedes standalone volume spike — both require volume_spike, avoid double-count
+        if sig.breakout_52w_high:
+            factors.append("52-week high breakout on volume")
+        elif sig.volume_spike:
             factors.append(f"Volume spike ({sig.volume_ratio:.1f}x 20d avg)")
 
         if sig.rsi_divergence == "bullish":
             factors.append(f"Bullish RSI(21) divergence (RSI={sig.rsi_21:.1f})")
-
-        if sig.breakout_52w_high:
-            factors.append("52-week high breakout on volume")
 
     elif direction == "bearish":
         if sig.near_200sma or sig.near_52w_high:
@@ -103,45 +100,26 @@ def _count_confluence(sig: PositionalSignals, direction: str) -> list[str]:
                 levels.append("52w high")
             factors.append(f"Price at key resistance ({', '.join(levels)})")
 
-        if sig.volume_spike:
+        # Distribution supersedes standalone volume spike — both require volume_spike, avoid double-count
+        if sig.near_52w_high and sig.volume_spike:
+            factors.append("Distribution at 52-week high")
+        elif sig.volume_spike:
             factors.append(f"Volume spike ({sig.volume_ratio:.1f}x 20d avg)")
 
         if sig.rsi_divergence == "bearish":
             factors.append(f"Bearish RSI(21) divergence (RSI={sig.rsi_21:.1f})")
 
-        if sig.near_52w_high and sig.volume_spike:
-            factors.append("Distribution at 52-week high")
-
     return factors
 
 
-def _persistence_gate(ticker: str, direction: str, sig: PositionalSignals) -> GateResult:
-    """Require 2 consecutive closes in the signal direction."""
-    state = get_consecutive_closes(ticker)
-    today = sig.last_date
-    current_dir = sig.consecutive_direction
-
-    if state.get("last_date") == today:
-        # Already updated today — use stored count
-        count = state.get("count", 0)
-        stored_dir = state.get("direction")
-    else:
-        # New day — update state
-        if state.get("direction") == current_dir:
-            count = state.get("count", 0) + 1
-        else:
-            count = 1
-        set_consecutive_closes(
-            ticker, current_dir or "flat", count,
-            sig.price or 0, today
-        )
-        stored_dir = current_dir
-
-    passed = count >= 2 and stored_dir == direction
+def _persistence_gate(direction: str, sig: PositionalSignals) -> GateResult:
+    """Require 2 consecutive daily closes in signal direction, computed from historical data."""
+    streak = sig.consecutive_streak
+    passed = streak >= 2 and sig.consecutive_direction == direction
     return GateResult(
         passed=passed,
         name="persistence",
-        detail=f"{count} consecutive {stored_dir or '?'} close(s) (need 2 in {direction} direction)",
+        detail=f"{streak} consecutive {sig.consecutive_direction or '?'} close(s) (need 2 in {direction} direction)",
     )
 
 
@@ -191,31 +169,59 @@ def analyze_ticker(
 
     regime_ok = gates[-1].passed
 
-    # Gate 2 — Weekly trend
-    weekly_ok = sig.weekly_trend in ("up", "down")
-    gates.append(GateResult(
-        passed=weekly_ok,
-        name="weekly_trend",
-        detail=f"Weekly trend: {sig.weekly_trend} (30w SMA: {sig.sma_30w:.2f})" if sig.sma_30w else "Weekly trend: flat",
-    ))
-
-    # Gate 3 — MA stack
-    ma_ok = sig.ma_stack_bullish or sig.ma_stack_bearish
-    if sig.ma_stack_bullish:
-        ma_detail = f"Bullish stack: price({sig.price:.2f}) > SMA50({sig.sma_50:.2f}) > SMA200({sig.sma_200:.2f})"
-    elif sig.ma_stack_bearish:
-        ma_detail = f"Bearish stack: price({sig.price:.2f}) < SMA50({sig.sma_50:.2f}) < SMA200({sig.sma_200:.2f})"
-    else:
-        ma_detail = "MA stack not aligned"
-    gates.append(GateResult(passed=ma_ok, name="ma_stack", detail=ma_detail))
-
-    # Determine direction before checking confluence and persistence
+    # Determine direction before trend/stack gates — enables direction-aware evaluation
     direction = _determine_signal_direction(sig)
 
     if not direction:
         result.not_confirmed_reason = "No clear directional bias (weekly trend and MA stack not aligned)"
         result.gates = gates
         return result
+
+    is_reversal = (
+        (sig.rsi_divergence == "bullish" and sig.near_52w_low) or
+        (sig.rsi_divergence == "bearish" and sig.near_52w_high)
+    )
+
+    # Gate 2 — Weekly trend (reversal requires opposite trend confirming the setup)
+    if is_reversal:
+        weekly_ok = sig.weekly_trend == ("down" if direction == "bullish" else "up")
+        weekly_detail = (
+            f"Counter-trend reversal — weekly trend {sig.weekly_trend} (30w SMA: {sig.sma_30w:.2f})"
+            if sig.sma_30w else f"Counter-trend reversal — weekly trend {sig.weekly_trend}"
+        )
+    else:
+        weekly_ok = sig.weekly_trend == ("up" if direction == "bullish" else "down")
+        weekly_detail = (
+            f"Weekly trend: {sig.weekly_trend} (30w SMA: {sig.sma_30w:.2f})"
+            if sig.sma_30w else f"Weekly trend: {sig.weekly_trend}"
+        )
+    gates.append(GateResult(passed=weekly_ok, name="weekly_trend", detail=weekly_detail))
+
+    # Gate 3 — MA stack (reversal requires opposite stack confirming oversold/overbought)
+    if is_reversal:
+        if direction == "bullish":
+            ma_ok = sig.ma_stack_bearish
+            ma_detail = (
+                f"Counter-trend reversal — price({sig.price:.2f}) < SMA50({sig.sma_50:.2f}) < SMA200({sig.sma_200:.2f}) (oversold setup)"
+                if sig.ma_stack_bearish else "MA stack not in expected bearish state for bullish reversal"
+            )
+        else:
+            ma_ok = sig.ma_stack_bullish
+            ma_detail = (
+                f"Counter-trend reversal — price({sig.price:.2f}) > SMA50({sig.sma_50:.2f}) > SMA200({sig.sma_200:.2f}) (overbought setup)"
+                if sig.ma_stack_bullish else "MA stack not in expected bullish state for bearish reversal"
+            )
+    else:
+        if sig.ma_stack_bullish:
+            ma_ok = True
+            ma_detail = f"Bullish stack: price({sig.price:.2f}) > SMA50({sig.sma_50:.2f}) > SMA200({sig.sma_200:.2f})"
+        elif sig.ma_stack_bearish:
+            ma_ok = True
+            ma_detail = f"Bearish stack: price({sig.price:.2f}) < SMA50({sig.sma_50:.2f}) < SMA200({sig.sma_200:.2f})"
+        else:
+            ma_ok = False
+            ma_detail = "MA stack not aligned"
+    gates.append(GateResult(passed=ma_ok, name="ma_stack", detail=ma_detail))
 
     # Bear regime suppresses bullish signals
     if not regime_ok and direction == "bullish":
@@ -233,8 +239,8 @@ def analyze_ticker(
     ))
     result.confluence_factors = confluence
 
-    # Gate 5 — Persistence
-    persistence_gate = _persistence_gate(ticker, direction, sig)
+    # Gate 5 — Persistence (streak computed from historical data — offline-safe)
+    persistence_gate = _persistence_gate(direction, sig)
     gates.append(persistence_gate)
 
     # Gate 6 — Earnings blackout
@@ -297,8 +303,10 @@ def run_analysis_cycle() -> list[AnalysisResult]:
         pass  # SPY used only for regime check
 
     results = []
-    for ticker in TICKERS:
+    for i, ticker in enumerate(TICKERS):
         try:
+            if i > 0:
+                time.sleep(0.5)
             log.info("Analyzing %s", ticker)
             r = analyze_ticker(ticker, spy_daily=spy_daily)
             results.append(r)
