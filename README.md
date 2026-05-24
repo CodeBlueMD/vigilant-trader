@@ -112,6 +112,38 @@ This lets you tune the system over time based on real results.
 
 ---
 
+## Run as a Background Daemon (macOS)
+
+To run VigilantTrader automatically on login and keep it alive without a Terminal window:
+
+```bash
+bash install_daemon.sh
+```
+
+This installs a launchd agent that:
+- Starts automatically when you log in
+- Restarts within 30 seconds if it crashes
+- Runs silently in the background — no Terminal needed
+
+**Important:** Go to **System Settings → Energy → Power Adapter** and enable **"Prevent automatic sleeping when display is off"** so the daemon keeps running when your screen locks.
+
+To manage the daemon:
+```bash
+# Check status
+launchctl list | grep vigilant-trader
+
+# Stop
+launchctl unload ~/Library/LaunchAgents/com.codebluemd.vigilant-trader.plist
+
+# Start
+launchctl load ~/Library/LaunchAgents/com.codebluemd.vigilant-trader.plist
+
+# Watch logs live
+tail -f vigilant.log
+```
+
+---
+
 ## Disclaimer
 
 This tool is for informational purposes only. It is NOT financial advice. Always do your own research before making any investment decision.
