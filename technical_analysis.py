@@ -112,6 +112,7 @@ class PositionalSignals:
     breakout_52w_high: bool = False
 
     atr_14: float | None = None
+    atr_50: float | None = None
     stop_distance_pct: float | None = None
 
     return_63d: float | None = None
@@ -152,6 +153,8 @@ def compute_positional_signals(
         sig.atr_14 = _last(atr_series)
         if sig.atr_14 and sig.price:
             sig.stop_distance_pct = round(2 * sig.atr_14 / sig.price * 100, 2)
+    if len(df_daily) >= 50:
+        sig.atr_50 = _last(atr(df_daily, length=50))
     atr_distance = sig.atr_14 if sig.atr_14 else (sig.price * 0.03)
 
     if len(close) >= 50:

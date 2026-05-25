@@ -50,6 +50,13 @@ GROQ_MODEL_FALLBACK: str = os.getenv("GROQ_MODEL_FALLBACK", "llama-3.3-70b-versa
 AI_BACKEND: str = os.getenv("AI_BACKEND", "groq").lower()
 AI_TIMEOUT_SECONDS: int = 30
 
+# --- Holdings drawdown protection ---
+HOLDING_ATR_MULTIPLIERS: dict = {
+    "IBIT": 3.0,   # crypto — wider threshold to filter normal volatility
+    "QQQM": 2.0,   # Nasdaq ETF — standard
+    "GLD":  1.5,   # gold — tighter, large moves are significant
+}
+
 # --- Schedule (US/Eastern) ---
 TIMEZONE: str = os.getenv("TIMEZONE", "America/Toronto")
 ANALYSIS_HOUR: int = int(os.getenv("ANALYSIS_HOUR", "16"))

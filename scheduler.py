@@ -17,7 +17,8 @@ from apscheduler.triggers.cron import CronTrigger
 
 from accuracy_tracker import evaluate_open_signals, log_signal
 from config import ANALYSIS_HOUR, ANALYSIS_MINUTE, TIMEZONE, log
-from email_system import send_positional_alert
+from drawdown_monitor import check_holdings_drawdown
+from email_system import send_drawdown_alert, send_positional_alert
 from monthly_report import run_monthly_report
 from positional_analyst import run_analysis_cycle
 from weekly_summary import run_weekly_summary
@@ -53,6 +54,7 @@ def _run_analysis() -> None:
                 ai_narrative="",
             )
             send_positional_alert(result)
+        _run_drawdown_check()
     except Exception as e:
         log.exception("Analysis cycle failed: %s", e)
     finally:
@@ -66,6 +68,22 @@ def _run_evaluations() -> None:
             log.info("Evaluated %d open signal(s)", n)
     except Exception as e:
         log.exception("Signal evaluation failed: %s", e)
+
+
+def _run_drawdown_check(tickers: list[str] | None = None) -> None:
+    tz = pytz.timezone(TIMEZONE)
+    if datetime.datetime.now(tz).weekday() >= 5:
+        return
+    try:
+        alerts = check_holdings_drawdown(tickers)
+        for alert in alerts:
+            send_drawdown_alert(alert)
+    except Exception as e:
+        log.exception("Drawdown check failed: %s", e)
+
+
+def _run_ibit_monday() -> None:
+    _run_drawdown_check(["IBIT"])
 
 
 def _run_sunday() -> None:
@@ -97,12 +115,17 @@ def start_scheduler(run_initial: bool = False) -> BackgroundScheduler:
         CronTrigger(day_of_week="sun", hour=8, minute=0, timezone=tz),
         id="sunday_emails", replace_existing=True,
     )
+    sched.add_job(
+        _run_ibit_monday,
+        CronTrigger(day_of_week="mon", hour=8, minute=0, timezone=tz),
+        id="ibit_monday_check", replace_existing=True,
+    )
 
     sched.start()
     _scheduler = sched
     _started = True
     log.info(
-        "Scheduler started — analysis weekdays %02d:%02d, evals 05:00, Sunday 08:00 (%s)",
+        "Scheduler started — analysis weekdays %02d:%02d, drawdown check same time, evals 05:00, Sunday 08:00, IBIT Monday 08:00 (%s)",
         ANALYSIS_HOUR, ANALYSIS_MINUTE, TIMEZONE,
     )
 

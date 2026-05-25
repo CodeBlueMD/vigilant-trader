@@ -168,6 +168,72 @@ def send_positional_alert(result: Any) -> bool:
     return _send(subject, html)
 
 
+def send_drawdown_alert(alert: Any) -> bool:
+    ticker = alert.ticker
+    price = alert.price
+    prev_close = alert.prev_close
+    drop_pct = alert.drop_pct
+    threshold_pct = alert.threshold_pct
+    multiplier = alert.multiplier
+    today = datetime.now().strftime("%b %-d, %Y")
+
+    def _dist(level: float | None, label: str) -> str:
+        if level is None:
+            return ""
+        pct = (price - level) / level * 100
+        direction = "above" if pct >= 0 else "below"
+        cls = "up" if pct >= 0 else "down"
+        return (
+            f'<tr><td class="label">{label}</td>'
+            f'<td><strong>{_fmt_price(level)}</strong></td>'
+            f'<td class="{cls}">{abs(pct):.1f}% {direction}</td></tr>'
+        )
+
+    rsi_html = ""
+    if alert.rsi_21 is not None:
+        rsi_cls = "down" if alert.oversold else "flat"
+        rsi_flag = " &nbsp;<strong style='color:#b91c1c'>OVERSOLD ⚠</strong>" if alert.oversold else ""
+        rsi_html = f'<tr><td class="label">RSI(21)</td><td class="{rsi_cls}"><strong>{alert.rsi_21:.1f}</strong>{rsi_flag}</td><td></td></tr>'
+
+    vol_html = ""
+    if alert.volume_ratio is not None:
+        vol_html = (
+            f'<tr><td class="label">Volume</td>'
+            f'<td class="down"><strong>{alert.volume_ratio:.1f}x</strong> 20d avg</td>'
+            f'<td class="flat" style="font-size:11px">institutional selling confirmed</td></tr>'
+        )
+
+    html = f"""
+<html><head>{_CSS}</head><body><div class="wrap">
+  <h1 style="color:#b91c1c">⚠ {ticker} DRAWDOWN · {_fmt_price(price)}</h1>
+  <div class="row">
+    <span class="badge bear">DROP: -{drop_pct:.1f}%</span>
+    <span class="flat" style="font-size:12px">{today}</span>
+  </div>
+
+  <div class="box" style="border-color:#fca5a5;background:#fff5f5">
+    <h2 style="color:#b91c1c">Alert Triggered</h2>
+    <div class="row">Dropped <strong>{drop_pct:.1f}%</strong> from yesterday's close of {_fmt_price(prev_close)}</div>
+    <div class="row" style="font-size:12px;color:#64748b">Threshold: {multiplier:.1f}× ATR(50) = {threshold_pct:.1f}%</div>
+  </div>
+
+  <div class="box">
+    <h2>Key Levels &amp; Indicators</h2>
+    <table>
+      {_dist(alert.sma_50, "SMA50")}
+      {_dist(alert.sma_200, "SMA200")}
+      {rsi_html}
+      {vol_html}
+    </table>
+  </div>
+
+  <div class="foot">{AI_DISCLAIMER}</div>
+</div></body></html>"""
+
+    subject = f"⚠ {ticker} DRAWDOWN -{drop_pct:.1f}% | {'Below SMA50' if alert.below_sma50 else 'Watch'}"
+    return _send(subject, html)
+
+
 def send_weekly_summary(results: list, narrative: str) -> bool:
     today = datetime.now().strftime("%a %b %-d, %Y")
 
