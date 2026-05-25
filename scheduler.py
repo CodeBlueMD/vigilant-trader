@@ -29,6 +29,10 @@ _started = False
 
 
 def _run_analysis() -> None:
+    tz = pytz.timezone(TIMEZONE)
+    if datetime.datetime.now(tz).weekday() >= 5:  # 5=Sat, 6=Sun
+        log.info("Skipping analysis — weekend (APScheduler guard).")
+        return
     if not _lock.acquire(blocking=False):
         log.info("Analysis already running — skipped.")
         return
