@@ -16,7 +16,6 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from accuracy_tracker import evaluate_open_signals, log_signal
-from ai_engine import ai_engine
 from config import ANALYSIS_HOUR, ANALYSIS_MINUTE, TIMEZONE, log
 from email_system import send_positional_alert
 from monthly_report import run_monthly_report
@@ -41,31 +40,19 @@ def _run_analysis() -> None:
         for result in results:
             if not result.signal_type:
                 continue
-            narrative = ai_engine.generate_positional_narrative(
-                ticker=result.ticker,
-                signal_type=result.signal_type,
-                confidence=result.confidence or "Medium",
-                confluence_factors=result.confluence_factors,
-                gates=result.gates,
-                price=result.price or 0,
-                currency=result.currency,
-                rsi=result.signals.rsi_21 if result.signals else None,
-                atr_stop_pct=result.signals.stop_distance_pct if result.signals else None,
-                is_holding=result.is_holding,
-                suggested_position_usd=result.suggested_position_usd,
-                earnings_date=result.earnings_date,
-            )
+            if result.confidence != "High":
+                continue
             log_signal(
                 ticker=result.ticker,
                 signal_type=result.signal_type,
-                confidence=result.confidence or "Medium",
+                confidence=result.confidence or "High",
                 entry_price=result.price or 0,
                 gates=result.gates,
                 atr_stop=result.atr_stop,
                 suggested_position_usd=result.suggested_position_usd,
-                ai_narrative=narrative,
+                ai_narrative="",
             )
-            send_positional_alert(result, narrative)
+            send_positional_alert(result)
     except Exception as e:
         log.exception("Analysis cycle failed: %s", e)
     finally:

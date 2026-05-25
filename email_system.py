@@ -62,7 +62,6 @@ h2{font-size:11px;margin:0 0 8px;color:#475569;letter-spacing:.06em;text-transfo
 .holding{background:#ede9fe;color:#3b0764;border:1px solid #c4b5fd}
 .gate-pass{color:#15803d;font-size:12px}
 .gate-fail{color:#b91c1c;font-size:12px}
-.narrative{color:#374151;font-size:13px;line-height:1.6;margin:8px 0}
 .size-box{background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:10px 14px;margin:8px 0}
 .foot{font-size:11px;color:#64748b;margin-top:14px;padding:8px 0;border-top:1px solid #e2e8f0}
 table{width:100%;border-collapse:collapse}
@@ -100,7 +99,7 @@ def _fmt_pct(p: Any) -> str:
         return "—"
 
 
-def send_positional_alert(result: Any, narrative: str) -> bool:
+def send_positional_alert(result: Any) -> bool:
     sig = result.signals
     signal_type = result.signal_type or "unknown"
     confidence = result.confidence or "Medium"
@@ -160,11 +159,6 @@ def send_positional_alert(result: Any, narrative: str) -> bool:
   <div class="box">
     <h2>Gate Results</h2>
     <table>{gate_rows}</table>
-  </div>
-
-  <div class="box">
-    <h2>Analyst Narrative</h2>
-    <div class="narrative">{narrative}</div>
   </div>
 
   <div class="foot">{AI_DISCLAIMER}</div>
