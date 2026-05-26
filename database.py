@@ -82,6 +82,9 @@ CREATE TABLE IF NOT EXISTS positional_signals (
     atr_stop               REAL,
     suggested_position_usd REAL,
     ai_narrative           TEXT,
+    entry_range_high       REAL,
+    entry_range_low        REAL,
+    volatility_tier        TEXT,
     eval_30d_ts            REAL,
     eval_30d_price         REAL,
     eval_30d_return_pct    REAL,
@@ -120,9 +123,24 @@ def get_conn() -> Iterator[sqlite3.Connection]:
         conn.close()
 
 
+def _migrate_db(conn: sqlite3.Connection) -> None:
+    """Add columns introduced after initial schema deployment."""
+    new_cols = [
+        ("entry_range_high", "REAL"),
+        ("entry_range_low",  "REAL"),
+        ("volatility_tier",  "TEXT"),
+    ]
+    for col, typedef in new_cols:
+        try:
+            conn.execute(f"ALTER TABLE positional_signals ADD COLUMN {col} {typedef}")
+        except sqlite3.OperationalError:
+            pass  # column already exists
+
+
 def init_db() -> None:
     with get_conn() as conn:
         conn.executescript(SCHEMA)
+        _migrate_db(conn)
     log.info("Database initialised at %s", DB_PATH)
 
 
@@ -267,16 +285,21 @@ def record_positional_signal(
     atr_stop: float | None,
     suggested_position_usd: float | None,
     ai_narrative: str,
+    entry_range_high: float | None = None,
+    entry_range_low: float | None = None,
+    volatility_tier: str = "",
 ) -> int:
     with get_conn() as conn:
         cur = conn.execute(
             """INSERT INTO positional_signals
                (signal_ts, ticker, signal_type, confidence, entry_price, gates_fired,
-                atr_stop, suggested_position_usd, ai_narrative)
-               VALUES (?,?,?,?,?,?,?,?,?)""",
+                atr_stop, suggested_position_usd, ai_narrative,
+                entry_range_high, entry_range_low, volatility_tier)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 time.time(), ticker, signal_type, confidence, entry_price,
                 json.dumps(gates_fired), atr_stop, suggested_position_usd, ai_narrative,
+                entry_range_high, entry_range_low, volatility_tier or None,
             ),
         )
         return int(cur.lastrowid)

@@ -52,6 +52,9 @@ def _run_analysis() -> None:
                 atr_stop=result.atr_stop,
                 suggested_position_usd=result.suggested_position_usd,
                 ai_narrative="",
+                entry_range_high=result.entry_high,
+                entry_range_low=result.entry_low,
+                volatility_tier=result.volatility_tier,
             )
             send_positional_alert(result)
         _run_drawdown_check()

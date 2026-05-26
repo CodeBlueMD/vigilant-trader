@@ -53,6 +53,9 @@ class AnalysisResult:
     earnings_date: datetime.date | None = None
     not_confirmed_reason: str = ""
     signals: PositionalSignals | None = None
+    entry_high: float | None = None
+    entry_low: float | None = None
+    volatility_tier: str = ""
 
 
 def _determine_signal_direction(sig: PositionalSignals) -> str | None:
@@ -289,6 +292,19 @@ def analyze_ticker(
 
     if sig.atr_14:
         result.atr_stop = round(sig.atr_14 * 2, 4)
+
+    if sig.atr_14 and sig.price:
+        p = sig.price
+        a = sig.atr_14
+        sma50 = sig.sma_50 or p
+        if direction == "bullish":
+            result.entry_high = round(p + 0.25 * a, 2) if sig.near_52w_high else round(p, 2)
+            result.entry_low = round(max(p - a, min(sma50, p)), 2)
+        else:
+            result.entry_low = round(p - 0.25 * a, 2) if sig.near_52w_low else round(p, 2)
+            result.entry_high = round(min(p + a, max(sma50, p)), 2)
+        atr_pct = (a / p) * 100
+        result.volatility_tier = "High" if atr_pct > 4.0 else "Medium" if atr_pct >= 1.5 else "Low"
 
     return result
 

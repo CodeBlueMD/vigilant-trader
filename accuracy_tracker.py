@@ -27,6 +27,9 @@ def log_signal(
     atr_stop: float | None,
     suggested_position_usd: float | None,
     ai_narrative: str,
+    entry_range_high: float | None = None,
+    entry_range_low: float | None = None,
+    volatility_tier: str = "",
 ) -> int:
     signal_id = record_positional_signal(
         ticker=ticker,
@@ -37,6 +40,9 @@ def log_signal(
         atr_stop=atr_stop,
         suggested_position_usd=suggested_position_usd,
         ai_narrative=ai_narrative,
+        entry_range_high=entry_range_high,
+        entry_range_low=entry_range_low,
+        volatility_tier=volatility_tier,
     )
     log.info("Logged signal #%d: %s %s (%s)", signal_id, ticker, signal_type, confidence)
     return signal_id

@@ -128,6 +128,71 @@ def send_positional_alert(result: Any) -> bool:
             + "</div>"
         )
 
+    entry_range_html = ""
+    if result.entry_high and result.entry_low and result.signals and result.signals.atr_14:
+        atr = result.signals.atr_14
+        stop_price = round((result.price or 0) - 2 * atr, 2)
+        base_risk = (result.price or 0) - stop_price  # risk at signal price
+
+        is_breakout = result.signals.near_52w_high and result.signal_type == "bullish"
+        is_breakdown = result.signals.near_52w_low and result.signal_type == "bearish"
+        zone_label = "Bullish Breakout — Chase Allowed" if is_breakout else (
+            "Bearish Breakdown — Chase Allowed" if is_breakdown else
+            ("Bullish Entry Zone" if result.signal_type == "bullish" else "Short Entry Zone")
+        )
+
+        vol_tier = result.volatility_tier or "Medium"
+        vol_color = {"High": "#b45309", "Medium": "#1d4ed8", "Low": "#15803d"}.get(vol_tier, "#1d4ed8")
+        exec_hint = {
+            "High": "Split orders: 30% near signal price, 70% limit at zone low.",
+            "Medium": "Scale in: 50% at market, 50% limit at zone midpoint.",
+            "Low": "Execute near signal price — deep pullbacks rare.",
+        }.get(vol_tier, "")
+
+        def _ladder_row(label: str, entry_p: float) -> str:
+            if base_risk <= 0:
+                return ""
+            risk = entry_p - stop_price
+            risk_pct = risk / entry_p * 100
+            size_mult = base_risk / risk if risk > 0 else 1.0
+            size_str = f"{size_mult:.0%}" if size_mult != 1.0 else "100% (Base)"
+            return (
+                f"<tr><td style='font-size:12px'>{label}</td>"
+                f"<td><strong>{_fmt_price(entry_p, currency)}</strong></td>"
+                f"<td class='down' style='font-size:12px'>{risk_pct:.1f}%</td>"
+                f"<td class='up' style='font-size:12px'>{size_str}</td></tr>"
+            )
+
+        mid = round((result.entry_high + result.entry_low) / 2, 2)
+        ladder_rows = (
+            _ladder_row("Aggressive (top)", result.entry_high)
+            + _ladder_row("Signal price", result.price or 0)
+            + _ladder_row("Balanced (mid)", mid)
+            + _ladder_row("Patient (low)", result.entry_low)
+        )
+
+        entry_range_html = f"""
+<div class="box" style="border-color:#86efac;background:#f0fdf4">
+  <h2 style="color:#15803d">Entry Zone · {zone_label}</h2>
+  <div class="row" style="font-size:16px;font-weight:700;color:#14532d">
+    {_fmt_price(result.entry_low, currency)} &ndash; {_fmt_price(result.entry_high, currency)}
+  </div>
+  <div class="row" style="font-size:11px;color:#64748b">
+    Hard stop: {_fmt_price(stop_price, currency)} &nbsp;|&nbsp;
+    Volatility: <span style="color:{vol_color};font-weight:600">{vol_tier}</span> ({atr / (result.price or 1) * 100:.1f}% ATR)
+  </div>
+  <div style="margin-top:8px">
+    <table>
+      <tr>
+        <th>Entry level</th><th>Price</th>
+        <th>Risk/share</th><th>Size mult</th>
+      </tr>
+      {ladder_rows}
+    </table>
+  </div>
+  <div class="row" style="font-size:11px;color:#475569;margin-top:6px">{exec_hint}</div>
+</div>"""
+
     earnings_html = (
         f'<div class="row" style="color:#92400e">⚠ Earnings: {result.earnings_date}</div>'
         if result.earnings_date else ""
@@ -154,6 +219,7 @@ def send_positional_alert(result: Any) -> bool:
   </div>
 
   {sizing_html}
+  {entry_range_html}
   {earnings_html}
 
   <div class="box">
